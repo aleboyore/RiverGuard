@@ -44,7 +44,9 @@ import {
 } from "@/components/auth/EnsureCurrent";
 import { convexConfigured } from "@/lib/convex-config";
 import { api } from "../../../../../convex/_generated/api";
-import { firebaseAuth } from "@/lib/firebase";
+import type { User } from "firebase/auth";
+
+import { getFirebaseAuth } from "@/lib/firebase";
 
 import {
   ActionLink,
@@ -689,17 +691,14 @@ function LoginFormBody({
   ensureCurrent: ProvisionAccount | null;
 }) {
   const router = useRouter();
-  const {
-    signInWithEmail,
-    signInWithGoogle,
-    sendEmailVerification,
-  } = useFirebaseAuth();
+  const { signInWithEmail, signInWithGoogle, sendEmailVerification } =
+    useFirebaseAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   async function finishSignIn() {
     // Without Convex the account (and therefore the role) cannot be read, so the
     // default workspace is used. Sign-in itself still succeeded.
-    const account = await ensureCurrent?.({});
+    const account = await provisionWithTimeout(ensureCurrent, {});
     const destination =
       account &&
       ["resident", "lgu", "researcher", "admin"].includes(account.role)
@@ -731,12 +730,19 @@ function LoginFormBody({
       if (!signedInUser.emailVerified) {
         let verificationSent = false;
         try {
-          await sendEmailVerification();
-          verificationSent = true;
+          const sent = await settleWithin(sendEmailVerification(), 10_000);
+          verificationSent = sent !== null;
+          if (!verificationSent) {
+            setError(
+              "Verification email request timed out. You can resend it on the next screen.",
+            );
+          }
         } catch (verificationSendError) {
           setError(formatAuthError(verificationSendError));
         }
-        const account = await ensureCurrent?.({ requestedRole: "resident" });
+        const account = await provisionWithTimeout(ensureCurrent, {
+          requestedRole: "resident",
+        });
         const role =
           account &&
           ["resident", "lgu", "researcher", "admin"].includes(account.role)
@@ -978,16 +984,17 @@ function ResidentSignupBody({
         String(formData.get("signup-email")).trim(),
         password,
       );
-      await ensureCurrent?.({
+      await provisionWithTimeout(ensureCurrent, {
         requestedRole: role,
         roleProfile: buildRoleProfile(formData, role),
       });
       let verificationSent = false;
-      try {
-        await sendEmailVerification();
-        verificationSent = true;
-      } catch (verificationSendError) {
-        setError(formatAuthError(verificationSendError));
+      const sent = await settleWithin(sendEmailVerification(), 10_000);
+      verificationSent = sent !== null;
+      if (!verificationSent) {
+        setError(
+          "Verification email request timed out. You can resend it on the next screen.",
+        );
       }
       router.push(
         `/auth/verify?role=${role}&source=signup&sent=${verificationSent ? "1" : "0"}`,
@@ -1154,7 +1161,12 @@ function ResidentSignupBody({
         label="Receive RiverGuard notifications"
         description="Optional and separate from account consent."
       />
-      <Button type="submit" loading={loading} className="w-full">
+      <Button
+        type="submit"
+        loading={loading}
+        loadingLabel="Creating account"
+        className="w-full"
+      >
         Create Account
       </Button>
       <div className="border-t border-line pt-3">
@@ -1169,7 +1181,7 @@ function ResidentSignupBody({
               const formData = signupForm.current
                 ? new FormData(signupForm.current)
                 : new FormData();
-              await ensureCurrent?.({
+              await provisionWithTimeout(ensureCurrent, {
                 requestedRole: role,
                 roleProfile: buildRoleProfile(formData, role),
               });
@@ -1196,6 +1208,45 @@ function ResidentSignupBody({
       </Link>
     </form>
   );
+}
+
+async function provisionWithTimeout(
+  provision: ProvisionAccount | null,
+  args: Parameters<ProvisionAccount>[0],
+): Promise<Awaited<ReturnType<ProvisionAccount>> | null> {
+  if (!provision) return null;
+  let timer: number | null = null;
+  try {
+    return await Promise.race([
+      provision(args),
+      new Promise<null>((resolve) => {
+        timer = window.setTimeout(() => resolve(null), 12_000);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
+  }
+}
+
+async function settleWithin<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T | null> {
+  let timer: number | null = null;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<null>((resolve) => {
+        timer = window.setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
+  }
 }
 
 function formatAuthError(error: unknown) {
@@ -1324,9 +1375,9 @@ function VerificationBody({
   const source = params.get("source") ?? "access";
   const isEmailVerification = source === "signup";
   const initialSendFailed = params.get("sent") === "0";
-  const [sendStatus, setSendStatus] = useState<
-    "idle" | "sent" | "failed"
-  >(initialSendFailed ? "failed" : "idle");
+  const [sendStatus, setSendStatus] = useState<"idle" | "sent" | "failed">(
+    initialSendFailed ? "failed" : "idle",
+  );
   useEffect(() => {
     if (secondsRemaining <= 0) return;
     const timer = window.setInterval(
@@ -1423,8 +1474,15 @@ function VerificationBody({
           disabled={secondsRemaining > 0}
           onClick={() => {
             if (isEmailVerification) {
-              void sendEmailVerification()
-                .then(() => {
+              void settleWithin(sendEmailVerification(), 10_000)
+                .then((sent) => {
+                  if (sent === null) {
+                    setSendStatus("failed");
+                    setVerificationError(
+                      "The verification email request timed out. Check Firebase mail settings and try again.",
+                    );
+                    return;
+                  }
                   setResent(true);
                   setSendStatus("sent");
                   setSecondsRemaining(60);
@@ -1468,13 +1526,22 @@ function VerificationBody({
           setChecking(true);
           setVerificationError("");
           try {
-            await user?.reload();
+            const reloadResult = user
+              ? await settleWithin(user.reload(), 8_000)
+              : null;
+            if (reloadResult === null) {
+              throw new Error(
+                "Verification status could not be refreshed. Check your connection and try again.",
+              );
+            }
             if (!user?.emailVerified) {
               throw new Error(
                 "Click the verification link in your email first.",
               );
             }
-            await ensureCurrent?.({ requestedRole: role });
+            await provisionWithTimeout(ensureCurrent, {
+              requestedRole: role,
+            });
             setVerified(true);
           } catch (error) {
             setVerificationError(formatAuthError(error));
@@ -1551,7 +1618,8 @@ function MfaScreen() {
   return (
     <div className="grid gap-3">
       <Notice title="MFA is not configured" tone="warning">
-        This prototype does not provide Firebase MFA or recovery-code verification.
+        This prototype does not provide Firebase MFA or recovery-code
+        verification.
       </Notice>
       <Button className="w-full" variant="quiet" disabled>
         MFA setup unavailable
@@ -2377,7 +2445,9 @@ export function WorkspaceMethodologyScreen({
 
 export function SettingsScreen({ screen }: { screen?: string }) {
   if (!convexConfigured) {
-    return <SettingsScreenBody screen={screen} currentUser={null} user={null} />;
+    return (
+      <SettingsScreenBody screen={screen} currentUser={null} user={null} />
+    );
   }
   return <LiveSettingsScreen screen={screen} />;
 }
@@ -2403,8 +2473,22 @@ function SettingsScreenBody({
   updateCurrentProfile,
 }: {
   screen?: string;
-  currentUser: any;
-  user: any;
+  /** The Convex `users` row for the signed-in person, once it has loaded. */
+  currentUser?: {
+    displayName?: string | null;
+    email?: string | null;
+    role?: string;
+    roleProfile?: {
+      organization?: string;
+      city?: string;
+      position?: string;
+      requestedArea?: string;
+      purpose?: string;
+      researcherType?: "government" | "private" | "independent" | "other";
+    };
+  } | null;
+  /** The Firebase account, which is what password reset and email need. */
+  user?: User | null;
   updateCurrentProfile?: (args: {
     displayName: string;
     roleProfile?: {
@@ -2430,15 +2514,18 @@ function SettingsScreenBody({
   const [position, setPosition] = useState(
     currentUser?.roleProfile?.position ?? "",
   );
+  /* eslint-disable react-hooks/set-state-in-effect --
+     The account row arrives from Convex after mount, so these fields cannot be
+     initialised during render without hydration mismatches. The values are
+     written once per change of `currentUser`/`user`, not in a render loop. */
   useEffect(() => {
     if (currentUser === undefined) return;
-    setDisplayName(
-      currentUser?.displayName ?? user?.displayName ?? "",
-    );
+    setDisplayName(currentUser?.displayName ?? user?.displayName ?? "");
     setOrganization(currentUser?.roleProfile?.organization ?? "");
     setCity(currentUser?.roleProfile?.city ?? "");
     setPosition(currentUser?.roleProfile?.position ?? "");
   }, [currentUser, user]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const [activeScreen, setActiveScreen] = useState(screen || "profile");
   const settingsTitle =
     activeScreen === "notifications"
@@ -2480,7 +2567,8 @@ function SettingsScreenBody({
         return;
       }
       try {
-        if (user) await updateProfile(user, { displayName: displayName.trim() });
+        if (user)
+          await updateProfile(user, { displayName: displayName.trim() });
         await updateCurrentProfile?.({
           displayName: displayName.trim(),
           roleProfile: {
@@ -2501,7 +2589,9 @@ function SettingsScreenBody({
         setSaved(true);
       } catch (error) {
         setSaveError(
-          error instanceof Error ? error.message : "Profile could not be saved.",
+          error instanceof Error
+            ? error.message
+            : "Profile could not be saved.",
         );
       }
     }
@@ -2555,9 +2645,7 @@ function SettingsScreenBody({
             value={firstName}
             onChange={(event) => {
               const nextFirst = event.target.value;
-              setDisplayName(
-                [nextFirst, lastName].filter(Boolean).join(" "),
-              );
+              setDisplayName([nextFirst, lastName].filter(Boolean).join(" "));
             }}
           />
           <TextField
@@ -2597,7 +2685,7 @@ function SettingsScreenBody({
             label="Role"
             value={
               currentUser?.role
-                ? roleLabel[currentUser.role] ?? currentUser.role
+                ? (roleLabel[currentUser.role] ?? currentUser.role)
                 : "Unavailable"
             }
             readOnly
@@ -2632,7 +2720,14 @@ function SettingsScreenBody({
                 disabled={!user?.email}
                 onClick={() => {
                   if (!user?.email) return;
-                  void sendPasswordResetEmail(firebaseAuth, user.email)
+                  const auth = getFirebaseAuth();
+                  if (!auth) {
+                    setSaveError(
+                      "Password reset is unavailable: this build has no Firebase configuration.",
+                    );
+                    return;
+                  }
+                  void sendPasswordResetEmail(auth, user.email)
                     .then(() => {
                       setSaved(false);
                       setSaveError("");

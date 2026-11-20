@@ -256,6 +256,10 @@ function ResidentPreferences() {
   const [outlookNotify, setOutlookNotify] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect --
+     localStorage does not exist during the server render, so these preferences
+     can only be read after mount. Reading them in a lazy initialiser would make
+     the server and client markup disagree. */
   useEffect(() => {
     try {
       const stored = JSON.parse(
@@ -274,6 +278,7 @@ function ResidentPreferences() {
       // Invalid local preferences are ignored and reset by the next save.
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function savePreferences() {
     window.localStorage.setItem(
@@ -924,17 +929,23 @@ function AdminHome() {
         }
       />
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {/*
+          These two used to print "3" and "Two require review" — invented
+          numbers with no query behind them. A count is only shown when a
+          deployment can produce it; until this screen reads one, the honest
+          value is "not counted".
+        */}
         <Metric
           label="Pending requests"
-          value="3"
-          detail="Two require review"
+          value="—"
+          detail="Not counted: no account query behind this screen"
           tone="warning"
         />
         <Metric
           label="Active users"
-          value="3"
-          detail="Across resident, LGU, and admin"
-          tone="primary"
+          value="—"
+          detail="Not counted: no account query behind this screen"
+          tone="warning"
         />
         <Metric
           label="Supported cities"
@@ -1044,25 +1055,13 @@ function RequestReview() {
             </div>
           </div>
           <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Button
-              size="small"
-              variant="quiet"
-              disabled
-            >
+            <Button size="small" variant="quiet" disabled>
               Request information
             </Button>
-            <Button
-              size="small"
-              variant="danger"
-              disabled
-            >
+            <Button size="small" variant="danger" disabled>
               Reject
             </Button>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled
-            >
+            <Button size="small" variant="secondary" disabled>
               Approve
             </Button>
           </div>
@@ -1281,7 +1280,9 @@ function ConfigurationScreen({
   kind: string;
   detail?: string;
 }) {
-  const [saved, setSaved] = useState(false);
+  // `saved` is read for the "saved" confirmation; nothing in this screen sets
+  // it because the form is not wired to a backend yet.
+  const [saved] = useState(false);
   const searchParams = useSearchParams();
   const researchView =
     searchParams.get("view") === "research" || Boolean(detail);
