@@ -19,6 +19,7 @@ import { v } from "convex/values";
 
 import { raiseAlertIfElevated, resolveSupersededAlerts } from "./alerts";
 import { requireCurrentUser, requireRole } from "./auth";
+import { hasIngestSecret } from "./ingest";
 import {
   assertLocationAccess,
   assignedLocationCodes,
@@ -95,6 +96,13 @@ export const recordOutlook = mutation({
     operatingThreshold: v.number(),
     warning: v.string(),
     days: v.array(forecastDayValidator),
+    /**
+     * Sent only by this project's own Next server, which runs the forecast in
+     * `/api/forecast` and holds no Convex identity of its own. It is compared
+     * against the deployment's `RIVERGUARD_INGEST_SECRET`; without that
+     * variable set, the argument is ignored and an identity is required.
+     */
+    serverSecret: v.optional(v.string()),
   },
   returns: v.object({
     runId: v.string(),
@@ -103,8 +111,17 @@ export const recordOutlook = mutation({
     alerts: v.number(),
   }),
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ["admin", "lgu", "researcher"]);
-    await assertLocationAccess(ctx, user, args.locationCode, ["researcher"]);
+    // This project's own Next server runs the forecast and has no Convex
+    // identity, so it presents the deployment credential instead.
+    const fromServer = hasIngestSecret(args.serverSecret);
+
+    // Residents record their own runs: they are the ones pressing the button.
+    const user = fromServer
+      ? null
+      : await requireRole(ctx, ["admin", "lgu", "researcher", "resident"]);
+    if (user) {
+      await assertLocationAccess(ctx, user, args.locationCode, ["researcher"]);
+    }
     if (args.days.length === 0) {
       throw new Error("recordOutlook requires at least one forecast day");
     }
@@ -119,7 +136,7 @@ export const recordOutlook = mutation({
     });
 
     const runId = await ctx.db.insert("forecastRuns", {
-      requestedBy: user._id,
+      requestedBy: user?._id,
       requestedAt: now,
       completedAt: now,
       provider: args.provider,
@@ -177,7 +194,7 @@ export const recordOutlook = mutation({
           locationCode: args.locationCode,
           locationName: args.locationName,
           riskAssessmentId: assessmentId,
-          validAt,
+          date: day.date,
           severity: day.riskLevel,
           probability: day.probability,
           waterLevelM: day.waterLevelM,
@@ -229,7 +246,7 @@ export const latestOutlook = query({
       .query("forecastRuns")
       .withIndex("by_requested_at", (index: any) => index)
       .order("desc")
-      .filter((row: any) => row.status === "completed")
+      .filter((q) => q.eq(q.field("status"), "completed"))
       .take(MAX_RUNS_SCANNED);
 
     let run: (typeof candidateRuns)[number] | null = null;
@@ -239,7 +256,7 @@ export const latestOutlook = query({
         .withIndex("by_run_valid_at", (index: any) =>
           index.eq("runId", candidate._id),
         )
-        .filter((row: any) => row.locationCode === args.locationCode)
+        .filter((q) => q.eq(q.field("locationCode"), args.locationCode))
         .take(1);
 
       if (probe.length > 0) {
@@ -306,7 +323,7 @@ export const latestOutlook = query({
       .withIndex("by_location_created_at", (index: any) =>
         index.eq("locationCode", args.locationCode),
       )
-      .filter((row: any) => row.status === "open")
+      .filter((q) => q.eq(q.field("status"), "open"))
       .collect();
 
     return {

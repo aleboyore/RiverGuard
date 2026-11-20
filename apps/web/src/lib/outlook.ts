@@ -232,12 +232,12 @@ export function useOutlookFeed(locationCode: string, horizonDays: 3 | 7 = 7) {
     setError(null);
     setErrorDetail(null);
     try {
-      const accessToken = await getIdToken();
+      const token = await getIdToken();
       const response = await fetch("/api/forecast", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ locationCode, horizonDays }),
       });

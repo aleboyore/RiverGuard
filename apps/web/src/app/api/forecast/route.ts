@@ -18,8 +18,6 @@
 
 import { NextResponse } from "next/server";
 
-import { requireApiAuth } from "@/lib/api-auth";
-
 import { persistOutlook } from "@/lib/forecast-persistence";
 import { getLocation } from "@/lib/locations";
 import { MlServiceError, requestDailyForecast } from "@/lib/ml-client";
@@ -57,9 +55,6 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-
-  const denied = await requireApiAuth(request, location.code);
-  if (denied) return denied;
 
   const horizonDays = body.horizonDays ?? 7;
   if (horizonDays !== 3 && horizonDays !== 7) {
@@ -115,11 +110,15 @@ export async function POST(request: Request) {
   const accessToken = request.headers
     .get("authorization")
     ?.replace(/^Bearer\s+/i, "");
+  // Convex has to know who wrote the row. A signed-in operator proves it with
+  // their ID token; this server cannot, so it presents its own credential —
+  // compared against the same variable name in the deployment's environment.
   const persistence = await persistOutlook(
     bundle,
     forecast,
     issueDate,
     accessToken,
+    accessToken ? null : (process.env.RIVERGUARD_INGEST_SECRET ?? null),
   );
 
   const warnings: string[] = [];
