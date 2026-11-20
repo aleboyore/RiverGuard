@@ -80,7 +80,7 @@ export async function raiseAlertIfElevated(
     locationCode: string;
     locationName: string;
     riskAssessmentId: string;
-    validAt: number;
+    date: string;
     severity: "lower" | "moderate" | "elevated" | "unavailable";
     probability: number;
     waterLevelM: number;
@@ -103,17 +103,12 @@ export async function raiseAlertIfElevated(
     .first();
   if (duplicate) return false;
 
-  const when = new Intl.DateTimeFormat("en-PH", {
-    timeZone: "Asia/Manila",
-    dateStyle: "medium",
-  }).format(new Date(input.validAt));
-
   await ctx.db.insert("alerts", {
     locationCode: input.locationCode,
     riskAssessmentId: input.riskAssessmentId,
     status: "open",
     severity: input.severity,
-    title: `Elevated flood risk - ${input.locationName} - ${when}`,
+    title: `Elevated flood risk - ${input.locationName} - ${input.date}`,
     message:
       `Experimental model output: ${(input.probability * 100).toFixed(0)}% flood probability, ` +
       `predicted level ${input.waterLevelM.toFixed(2)} m (${

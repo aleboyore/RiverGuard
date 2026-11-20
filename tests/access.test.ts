@@ -171,3 +171,52 @@ it("legacy status is not implicit approval and legacy pending requests can be mi
   await db.mutation(internal.applications.migratePending, {});
   expect(await admin.query(api.applications.queue)).toHaveLength(1);
 });
+
+it("saves a signed-in forecast and reads it back as the city's latest outlook", async () => {
+  const { member, db } = await setup();
+  await member.mutation(api.users.register, {
+    requestedRole: "resident",
+    roleProfile: { city: "Manila" },
+  });
+  const result = await member.mutation(api.forecasts.recordOutlook, {
+    locationCode: "manila",
+    locationName: "Manila",
+    issueDate: "2026-11-20",
+    provider: "test",
+    providerDegraded: false,
+    retrievedAt: 1,
+    modelName: "test",
+    modelVersion: "1",
+    featureSchemaVersion: "1",
+    operatingThreshold: 0.6,
+    warning: "Test only",
+    days: [
+      {
+        date: "2026-11-21",
+        horizonDays: 1,
+        rainfallMm: 1,
+        probability: 0.8,
+        waterLevelM: 1,
+        riskLevel: "elevated",
+        alertLevel: "first",
+        exceedsOperatingThreshold: true,
+        reasons: [],
+      },
+    ],
+  });
+  expect(result).toMatchObject({ forecasts: 1, assessments: 1, alerts: 1 });
+  const run = await db.run((ctx) => ctx.db.query("forecastRuns").unique());
+  expect(run?.requestedBy).toBe(
+    (await member.query(api.users.getCurrent))?._id,
+  );
+  expect(
+    await member.query(api.forecasts.latestOutlook, { locationCode: "manila" }),
+  ).toMatchObject({
+    runId: result.runId,
+    alerts: 1,
+    days: [{ date: "2026-11-21" }],
+  });
+  expect(
+    await member.query(api.forecasts.latestOutlook, { locationCode: "pasig" }),
+  ).toBeNull();
+});

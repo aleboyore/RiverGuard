@@ -194,7 +194,7 @@ export const recordOutlook = mutation({
           locationCode: args.locationCode,
           locationName: args.locationName,
           riskAssessmentId: assessmentId,
-          validAt,
+          date: day.date,
           severity: day.riskLevel,
           probability: day.probability,
           waterLevelM: day.waterLevelM,
@@ -246,7 +246,7 @@ export const latestOutlook = query({
       .query("forecastRuns")
       .withIndex("by_requested_at", (index: any) => index)
       .order("desc")
-      .filter((row: any) => row.status === "completed")
+      .filter((q) => q.eq(q.field("status"), "completed"))
       .take(MAX_RUNS_SCANNED);
 
     let run: (typeof candidateRuns)[number] | null = null;
@@ -256,7 +256,7 @@ export const latestOutlook = query({
         .withIndex("by_run_valid_at", (index: any) =>
           index.eq("runId", candidate._id),
         )
-        .filter((row: any) => row.locationCode === args.locationCode)
+        .filter((q) => q.eq(q.field("locationCode"), args.locationCode))
         .take(1);
 
       if (probe.length > 0) {
@@ -323,7 +323,7 @@ export const latestOutlook = query({
       .withIndex("by_location_created_at", (index: any) =>
         index.eq("locationCode", args.locationCode),
       )
-      .filter((row: any) => row.status === "open")
+      .filter((q) => q.eq(q.field("status"), "open"))
       .collect();
 
     return {
