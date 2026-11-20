@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     forecast,
     issueDate,
     accessToken,
-    process.env.RIVERGUARD_INGEST_SECRET ?? null,
+    accessToken ? null : (process.env.RIVERGUARD_INGEST_SECRET ?? null),
   );
 
   const warnings: string[] = [];
