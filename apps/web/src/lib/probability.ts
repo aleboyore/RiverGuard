@@ -10,9 +10,7 @@
  *  - below 10% uses two decimals (0.50% – 9.99%); from 10% up, one decimal.
  */
 
-export function formatProbability(
-  value: number | null | undefined,
-): string {
+export function formatProbability(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   if (!Number.isFinite(value)) return "—";
   if (value < 0 || value > 1) return "—";

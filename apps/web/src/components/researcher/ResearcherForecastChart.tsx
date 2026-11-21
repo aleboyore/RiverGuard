@@ -92,7 +92,10 @@ export function ResearcherForecastChart({
               formatter={(value, name) => {
                 const numeric = Number(value);
                 if (name === "probability")
-                  return [formatProbability(numeric / 100), "Flood probability"];
+                  return [
+                    formatProbability(numeric / 100),
+                    "Flood probability",
+                  ];
                 if (name === "rainfall")
                   return [`${numeric.toFixed(1)} mm`, "Rainfall"];
                 return [numeric, name];

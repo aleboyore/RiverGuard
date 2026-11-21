@@ -172,7 +172,11 @@ export const provisionLguProfile = mutation({
       `[lguProfiles] admin ${admin._id} provisioned ${email} → [${assigned.join(", ")}]`,
     );
 
-    return { userId: String(user._id), assignedLocationCodes: assigned, status: "active" };
+    return {
+      userId: String(user._id),
+      assignedLocationCodes: assigned,
+      status: "active",
+    };
   },
 });
 
@@ -207,10 +211,9 @@ export const myLguProfile = query({
       cityCode: profile.cityCode,
       assignedLocationCodes: [
         ...new Set(
-          [
-            ...(profile.assignedLocationCodes ?? []),
-            profile.cityCode,
-          ].map((code) => normalizeLocationCode(code)),
+          [...(profile.assignedLocationCodes ?? []), profile.cityCode].map(
+            (code) => normalizeLocationCode(code),
+          ),
         ),
       ],
       organization: profile.organization,

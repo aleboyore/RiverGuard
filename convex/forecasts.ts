@@ -606,7 +606,6 @@ export const failStaleRuns = internalMutation({
   },
 });
 
-
 /**
  * Record a failed forecast attempt.
  *
@@ -677,6 +676,9 @@ export const recordFailure = mutation({
 function sanitiseReason(reason: string): string {
   let text = String(reason ?? "").slice(0, 300);
   text = text.replace(/https?:\/\/\S+/gi, "[url]");
-  text = text.replace(/(bearer|token|secret|key)\s*[:=]\s*\S+/gi, "$1=[redacted]");
+  text = text.replace(
+    /(bearer|token|secret|key)\s*[:=]\s*\S+/gi,
+    "$1=[redacted]",
+  );
   return text.trim() || "Unknown failure.";
 }

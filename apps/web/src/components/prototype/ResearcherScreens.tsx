@@ -697,13 +697,13 @@ function ForecastProgress() {
             ) : null}
             {feed.failureTracked === "tracked" ? (
               <p className="text-metadata mt-2 text-muted">
-                This attempt was logged as a failed run (visible in run
-                history; not model output).
+                This attempt was logged as a failed run (visible in run history;
+                not model output).
               </p>
             ) : feed.failureTracked === "untracked" ? (
               <p className="text-metadata mt-2 text-warning">
-                This attempt could not be logged as a failed run — it will
-                not appear in history.
+                This attempt could not be logged as a failed run — it will not
+                appear in history.
               </p>
             ) : null}
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1048,9 +1048,9 @@ function RunDetailView({ run }: { run: StoredRun }) {
           {run.errorCode
             ? `Failed at the ${run.errorCode.replace(/_/g, " ")} stage. `
             : ""}
-          {run.failureReason ?? "No further detail was recorded."}{" "}
-          This is not a forecast — no predictions were produced or stored, and
-          nothing here may be read as model output.
+          {run.failureReason ?? "No further detail was recorded."} This is not a
+          forecast — no predictions were produced or stored, and nothing here
+          may be read as model output.
         </Notice>
       ) : null}
 

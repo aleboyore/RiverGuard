@@ -155,7 +155,6 @@ export async function persistOutlook(
   }
 }
 
-
 export interface FailurePersistenceResult {
   tracked: boolean;
   kind: "convex" | "local" | "none";

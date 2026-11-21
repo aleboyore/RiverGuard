@@ -92,10 +92,7 @@ export interface RecentRun {
 }
 
 export type RecordFailureStage =
-  | "weather_provider"
-  | "ml_service"
-  | "persistence"
-  | "unknown";
+  "weather_provider" | "ml_service" | "persistence" | "unknown";
 
 export type RecordFailureArgs = {
   locationCode: string;

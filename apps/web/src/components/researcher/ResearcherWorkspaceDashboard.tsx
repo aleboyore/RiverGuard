@@ -331,11 +331,14 @@ export function ResearcherWorkspaceDashboard() {
                     <p className="text-xs leading-5 text-[#53697d]">
                       {activeDay.waterLevelM != null
                         ? `Predicted level ${activeDay.waterLevelM.toFixed(2)} m is ${
-                            activeDay.waterLevelM - location.alarmLevelsM[0] >= 0
+                            activeDay.waterLevelM - location.alarmLevelsM[0] >=
+                            0
                               ? `${(activeDay.waterLevelM - location.alarmLevelsM[0]).toFixed(2)} m above`
                               : `${(location.alarmLevelsM[0] - activeDay.waterLevelM).toFixed(2)} m below`
                           } the first alarm (${location.alarmLevelsM[0].toFixed(1)} m, ${
-                            location.alarmsVerified ? "verified" : "representative"
+                            location.alarmsVerified
+                              ? "verified"
+                              : "representative"
                           }).`
                         : "No water-level estimate stored for this day."}{" "}
                       Operating threshold {(threshold * 100).toFixed(1)}%.
@@ -377,7 +380,9 @@ export function ResearcherWorkspaceDashboard() {
           <Metric
             icon={<Waves size={20} />}
             label="Highest predicted level"
-            value={maxWaterLevel != null ? `${maxWaterLevel.toFixed(2)} m` : "—"}
+            value={
+              maxWaterLevel != null ? `${maxWaterLevel.toFixed(2)} m` : "—"
+            }
             detail="Model-predicted proxy"
           />
           <Metric
@@ -484,10 +489,7 @@ export function ResearcherWorkspaceDashboard() {
                 />
                 <InputRow
                   label="Input source"
-                  value={
-                    outlook.snapshot?.observed?.rainSource ??
-                    "Unknown"
-                  }
+                  value={outlook.snapshot?.observed?.rainSource ?? "Unknown"}
                 />
                 <InputRow
                   label="Input quality"
@@ -495,7 +497,7 @@ export function ResearcherWorkspaceDashboard() {
                     outlook.snapshot?.degraded
                       ? "Degraded — not a live forecast"
                       : (outlook.snapshot?.observed?.qualityStatus ??
-                          "provisional")
+                        "provisional")
                   }
                 />
                 <InputRow
