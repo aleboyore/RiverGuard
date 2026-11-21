@@ -89,6 +89,7 @@ export const upsertDays = mutation({
   },
   handler: async (ctx, { locationCode, locationName, days, secret }) => {
     await assertIngestAuthorized(ctx, secret);
+
     const now = Date.now();
     let inserted = 0;
     let updated = 0;

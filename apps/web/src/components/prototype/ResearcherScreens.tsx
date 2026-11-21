@@ -1733,7 +1733,7 @@ function DataSourceForm({
 }: {
   basePath?: string;
 }) {
-  const [saved, setSaved] = useState(false);
+  const [saved] = useState(false);
   return (
     <>
       <PageHeading

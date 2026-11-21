@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  // Stored runs are operational data: signed-in accounts only.
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get("limit") ?? 25);
   const limit = Number.isFinite(requested)

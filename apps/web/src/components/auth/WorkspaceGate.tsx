@@ -1,141 +1,69 @@
 "use client";
-
-import { useConvexAuth, useQuery } from "convex/react";
+import {
+  useConvexAuth,
+  useConvexConnectionState,
+  useQuery_experimental,
+} from "convex/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-
+import { useEffect, type ReactNode } from "react";
 import { useFirebaseAuth } from "./FirebaseAuthProvider";
 import { api } from "../../../../../convex/_generated/api";
 import { convexConfigured } from "@/lib/convex-config";
+import { accountDestination } from "@/lib/account-client";
 import type { ProductRole } from "@/data/prototype";
-
-function devBypassEnabled() {
-  // Local design/content preview only. The NODE_ENV check prevents this flag
-  // from weakening access control in a production build.
-  return (
-    process.env.NODE_ENV === "development" &&
-    process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === "true"
+type Props = { role: ProductRole; children: ReactNode };
+export function WorkspaceGate(props: Props) {
+  return convexConfigured ? (
+    <Gate {...props} />
+  ) : (
+    <main className="p-6">
+      Access cannot be verified: the workspace database is unavailable.
+    </main>
   );
 }
-
-/**
- * Convex is optional. When no usable deployment URL exists, the Convex hooks
- * below throw ("Could not find ConvexProviderWithAuth"), which took down every
- * protected route. Pick the implementation from a build-time constant so the
- * hook set never changes between renders.
- */
-export function WorkspaceGate({
-  role,
-  children,
-}: {
-  role: ProductRole;
-  children: React.ReactNode;
-}) {
-  if (!convexConfigured) {
-    return <FirebaseOnlyGate role={role}>{children}</FirebaseOnlyGate>;
-  }
-  return <ConvexBackedGate role={role}>{children}</ConvexBackedGate>;
-}
-
-/**
- * Degraded gate for builds without Convex: sign-in is still required, but role
- * and account status cannot be read from the deployment, so only authentication
- * is enforced.
- */
-function FirebaseOnlyGate({
-  role,
-  children,
-}: {
-  role: ProductRole;
-  children: React.ReactNode;
-}) {
-  const devBypassAuth = devBypassEnabled();
+function Gate({ role, children }: Props) {
+  const { user, loading } = useFirebaseAuth();
+  const auth = useConvexAuth();
+  const { isWebSocketConnected } = useConvexConnectionState();
   const router = useRouter();
-  const { user, loading: firebaseLoading } = useFirebaseAuth();
-
-  useEffect(() => {
-    if (devBypassAuth) return;
-    if (!firebaseLoading && user === null) {
-      router.replace(`/auth/login?return=/${role}`);
-    }
-  }, [devBypassAuth, firebaseLoading, role, router, user]);
-
-  if (devBypassAuth) return <>{children}</>;
-
-  if (firebaseLoading || !user) {
-    return (
-      <main className="p-6 text-muted">Checking your RiverGuard access…</main>
-    );
-  }
-
-  return <>{children}</>;
-}
-
-function ConvexBackedGate({
-  role,
-  children,
-}: {
-  role: ProductRole;
-  children: React.ReactNode;
-}) {
-  const devBypassAuth = devBypassEnabled();
-  const router = useRouter();
-  const { user, loading: firebaseLoading } = useFirebaseAuth();
-  const { isAuthenticated: convexAuthenticated, isLoading: convexLoading } =
-    useConvexAuth();
-  const currentUser = useQuery(
-    api.users.getCurrent,
-    convexAuthenticated ? {} : "skip",
-  );
-
-  useEffect(() => {
-    if (devBypassAuth) return;
-    if (!firebaseLoading && user === null) {
-      router.replace(`/auth/login?return=/${role}`);
-      return;
-    }
-    if (currentUser && currentUser.role !== role) {
-      router.replace(`/${currentUser.role}`);
-    }
-  }, [currentUser, devBypassAuth, firebaseLoading, role, router, user]);
-
-  if (devBypassAuth) return <>{children}</>;
-
-  if (
-    firebaseLoading ||
-    convexLoading ||
-    !user ||
-    !convexAuthenticated ||
-    currentUser === undefined
+  const result = useQuery_experimental({
+    query: api.users.getCurrent,
+    args: auth.isAuthenticated ? {} : "skip",
+    throwOnError: false,
+  });
+  let destination: string | undefined;
+  if (!loading && !user) destination = "/auth/login";
+  else if (
+    user &&
+    !auth.isLoading &&
+    auth.isAuthenticated &&
+    isWebSocketConnected &&
+    result.status === "success"
   ) {
-    return (
-      <main className="p-6 text-muted">Checking your RiverGuard access…</main>
-    );
+    const account = result.data;
+    if (!account || account.externalId === user.uid) {
+      destination = accountDestination(account, user.emailVerified);
+      if (
+        account?.status === "active" &&
+        user.emailVerified &&
+        (account.role === role || account.additionalRoles?.includes(role))
+      )
+        destination = "allowed";
+    }
   }
-
-  if (currentUser === null) {
-    return (
-      <main className="p-6 text-muted">
-        Your account is not provisioned in RiverGuard yet. Return to sign in and
-        try again.
-      </main>
-    );
-  }
-
-  if ((currentUser.status ?? "active") !== "active") {
-    return (
-      <main className="p-6 text-muted">
-        Your RiverGuard account is not active. Contact an administrator for
-        access.
-      </main>
-    );
-  }
-
-  if (currentUser.role !== role) {
-    return (
-      <main className="p-6 text-muted">Redirecting to your workspace…</main>
-    );
-  }
-
-  return children;
+  useEffect(() => {
+    if (destination && destination !== "allowed") router.replace(destination);
+  }, [destination, router]);
+  if (destination === "allowed") return children;
+  return (
+    <main className="p-6">
+      {!isWebSocketConnected ||
+      result.status === "error" ||
+      (!auth.isLoading && !auth.isAuthenticated)
+        ? "Access cannot be verified."
+        : "Checking your RiverGuard access…"}{" "}
+      <Link href="/auth/login">Return to sign in</Link>
+    </main>
+  );
 }

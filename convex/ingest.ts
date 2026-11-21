@@ -1,17 +1,29 @@
 /**
- * Server credential for ingest mutations.
+ * Authorisation for the ingest mutations.
  *
- * This repository's own Next.js server (`/api/forecast`, `/api/historical`,
- * `scripts/import_historical_dataset.mjs`) calls Convex without a Firebase
- * identity — Convex cannot reach the developer's loopback machine, so the
- * write direction is always local → cloud. Those calls prove they belong to
- * the project by presenting the deployment's `RIVERGUARD_INGEST_SECRET`.
+ * `observedWeather:upsertDays`, `historical:upsertBatch` and
+ * `historical:upsertFloodEvents` write the rows the charts, the risk badges and
+ * the model inputs are built from. They are called in two ways:
  *
- * Fail closed: when the variable is not set on the deployment, a request
- * carrying no user identity is rejected. Set the variable on the deployment
- * and in the web app's server environment (never `NEXT_PUBLIC_*`) to keep the
- * live write path working.
+ *   1. by this repository's own server code — `/api/forecast`,
+ *      `/api/historical` and `scripts/import_historical_dataset.mjs`, which
+ *      hold no Firebase identity and therefore cannot use the normal
+ *      user check;
+ *   2. by a signed-in person importing a dataset by hand.
+ *
+ * Both are allowed, but only with proof. The deployment's
+ * `RIVERGUARD_INGEST_SECRET` is the proof for case 1 and an active
+ * `admin` account is the proof for case 2. Anything else is refused.
+ *
+ * The check fails closed on purpose: when `RIVERGUARD_INGEST_SECRET` is not set
+ * on the deployment, a request that carries no user identity is rejected rather
+ * than trusted. Set the variable on the deployment and in the web app's server
+ * environment (never `NEXT_PUBLIC_*`) to keep the live write path working.
  */
+
+import type { MutationCtx } from "./_generated/server";
+
+import { requireRole } from "./auth";
 
 /**
  * Convex exposes the deployment's environment variables on `process.env`, but
@@ -19,8 +31,6 @@
  * the accessor is declared here rather than pulling Node's whole type surface
  * into functions that cannot use it.
  */
-import { requireRole } from "./auth";
-
 declare const process: { env: Record<string, string | undefined> };
 
 /** Constant-time comparison, so the secret cannot be guessed a byte at a time. */
@@ -55,12 +65,13 @@ export function hasIngestSecret(secret?: string | null): boolean {
  * LGU assignment is the wrong boundary here — secret or admin, nothing else.
  */
 export async function assertIngestAuthorized(
-  ctx: any,
+  ctx: MutationCtx,
   secret?: string | null,
 ): Promise<void> {
   if (hasIngestSecret(secret)) {
     return;
   }
 
+  // A global import is not limited to any one LGU assignment.
   await requireRole(ctx, ["admin"]);
 }

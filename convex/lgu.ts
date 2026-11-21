@@ -1,4 +1,5 @@
-import { requireRole, type AuthenticatedUser } from "./auth";
+import type { QueryCtx } from "./_generated/server";
+import { hasRole, requireRole, type AuthenticatedUser } from "./auth";
 
 /**
  * LGU access is derived only from the approved lguProfiles assignment. The
@@ -9,14 +10,20 @@ export function normalizeLocationCode(value: string): string {
 }
 
 export async function assignedLocationCodes(
-  ctx: any,
+  ctx: QueryCtx,
   user: AuthenticatedUser,
+  unrestricted: readonly ("researcher" | "resident")[] = [],
 ): Promise<string[] | null> {
-  if (user.role !== "lgu") return null;
+  if (
+    !hasRole(user, "lgu") ||
+    hasRole(user, "admin") ||
+    unrestricted.some((role) => hasRole(user, role))
+  )
+    return null;
 
   const profile = await ctx.db
     .query("lguProfiles")
-    .withIndex("by_user", (index: any) => index.eq("userId", user._id))
+    .withIndex("by_user", (index) => index.eq("userId", user._id))
     .first();
 
   const values = [
@@ -35,24 +42,25 @@ export async function assignedLocationCodes(
 }
 
 export async function assertLocationAccess(
-  ctx: any,
+  ctx: QueryCtx,
   user: AuthenticatedUser,
   locationCode: string,
+  unrestricted: readonly ("researcher" | "resident")[] = [],
 ) {
-  const allowed = await assignedLocationCodes(ctx, user);
-  if (allowed === null) return;
-  if (allowed.length === 0) {
+  const allowed = await assignedLocationCodes(ctx, user, unrestricted);
+  if (allowed !== null && allowed.length === 0) {
     throw new Error(
       "This LGU account has no assigned jurisdiction. Ask a RiverGuard administrator to provision the lguProfiles row for this account (see docs/convex-setup-and-migration-guide.md, §8).",
     );
   }
-  if (!allowed.includes(normalizeLocationCode(locationCode))) {
-    throw new Error(
-      "This location is outside your approved LGU assignment.",
-    );
+  if (
+    allowed !== null &&
+    !allowed.includes(normalizeLocationCode(locationCode))
+  ) {
+    throw new Error("This location is outside your approved LGU assignment.");
   }
 }
 
-export async function requireLguOrAdmin(ctx: any) {
+export async function requireLguOrAdmin(ctx: QueryCtx) {
   return requireRole(ctx, ["lgu", "admin"]);
 }

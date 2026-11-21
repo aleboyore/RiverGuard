@@ -14,8 +14,8 @@ import {
 } from "convex/server";
 import { v } from "convex/values";
 
-import { requireRole } from "./auth";
 import { assertLocationAccess } from "./lgu";
+import { requireRole } from "./auth";
 
 export const listForLocation = query({
   args: {
@@ -24,8 +24,12 @@ export const listForLocation = query({
   },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ["resident", "lgu", "admin"]);
-    await assertLocationAccess(ctx, user, args.locationCode);
+    await assertLocationAccess(
+      ctx,
+      await requireRole(ctx, ["resident", "lgu", "admin"]),
+      args.locationCode,
+      ["resident"],
+    );
     return await ctx.db
       .query("alerts")
       .withIndex("by_location_created_at", (index) =>
@@ -41,8 +45,12 @@ export const listOpenForLocation = query({
   args: { locationCode: v.string(), limit: v.optional(v.number()) },
   returns: v.any(),
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ["resident", "lgu", "admin"]);
-    await assertLocationAccess(ctx, user, args.locationCode);
+    await assertLocationAccess(
+      ctx,
+      await requireRole(ctx, ["resident", "lgu", "admin"]),
+      args.locationCode,
+      ["resident"],
+    );
     const rows = await ctx.db
       .query("alerts")
       .withIndex("by_location_created_at", (index: any) =>
@@ -72,7 +80,7 @@ export async function raiseAlertIfElevated(
     locationCode: string;
     locationName: string;
     riskAssessmentId: string;
-    validAt: number;
+    date: string;
     severity: "lower" | "moderate" | "elevated" | "unavailable";
     probability: number;
     waterLevelM: number;
@@ -95,19 +103,14 @@ export async function raiseAlertIfElevated(
     .first();
   if (duplicate) return false;
 
-  const when = new Intl.DateTimeFormat("en-PH", {
-    timeZone: "Asia/Manila",
-    dateStyle: "medium",
-  }).format(new Date(input.validAt));
-
   await ctx.db.insert("alerts", {
     locationCode: input.locationCode,
     riskAssessmentId: input.riskAssessmentId,
     status: "open",
     severity: input.severity,
-    title: `Elevated flood risk - ${input.locationName} - ${when}`,
+    title: `Elevated flood risk - ${input.locationName} - ${input.date}`,
     message:
-      `Experimental model output: ${(input.probability * 100).toFixed(2)}% flood probability, ` +
+      `Experimental model output: ${(input.probability * 100).toFixed(0)}% flood probability, ` +
       `predicted level ${input.waterLevelM.toFixed(2)} m (${
         input.alertLevel === "none"
           ? "below alarm levels"
@@ -152,9 +155,7 @@ export async function resolveSupersededAlerts(
 }
 
 export const acknowledge = mutation({
-  // acknowledgement identity comes from the verified auth context; a
-  // client-supplied acknowledgedBy is never trusted.
-  args: { alertId: v.id("alerts") },
+  args: { alertId: v.id("alerts"), acknowledgedBy: v.optional(v.id("users")) },
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ["lgu", "admin"]);

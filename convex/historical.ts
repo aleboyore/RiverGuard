@@ -75,6 +75,7 @@ export const upsertBatch = mutation({
   }),
   handler: async (ctx, args) => {
     await assertIngestAuthorized(ctx, args.secret);
+
     if (args.records.length === 0 || args.records.length > 250) {
       throw new Error(
         "Historical import batches must contain 1 to 250 records",
@@ -247,6 +248,7 @@ export const upsertFloodEvents = mutation({
   returns: v.object({ inserted: v.number(), updated: v.number() }),
   handler: async (ctx, args) => {
     await assertIngestAuthorized(ctx, args.secret);
+
     let inserted = 0;
     let updated = 0;
     for (const event of args.events) {

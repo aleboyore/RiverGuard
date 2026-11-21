@@ -13,11 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GisLayerSummary } from "@/lib/gis-types";
 import { gisLayerIdFromKey, gisLayerKey } from "@/lib/gis-types";
 import { useGisLayers } from "@/lib/use-gis-layers";
-import {
-  LOCATION_CODES,
-  LOCATIONS,
-  type LocationCode,
-} from "@/lib/locations";
+import { LOCATION_CODES, LOCATIONS, type LocationCode } from "@/lib/locations";
 import type { OutlookSnapshot } from "@/lib/outlook";
 import { formatProbability } from "@/lib/probability";
 import type { MapLayerId } from "@/types";
@@ -424,13 +420,7 @@ export function RiverMap({
     return () => {
       cancelled = true;
     };
-  }, [
-    forecast,
-    locationCode,
-    mapStatus,
-    onLocationChange,
-    selectedDay,
-  ]);
+  }, [forecast, locationCode, mapStatus, onLocationChange, selectedDay]);
 
   function resetView() {
     mapRef.current?.fitBounds(NCR_VIEW_BOUNDS, {
@@ -447,9 +437,7 @@ export function RiverMap({
     Math.max((forecast?.days.length ?? 1) - 1, 0),
   );
   const activeDay = forecast?.days[activeIndex] ?? null;
-  const selectedLocation = locationCode
-    ? LOCATIONS[locationCode]
-    : null;
+  const selectedLocation = locationCode ? LOCATIONS[locationCode] : null;
 
   // Three different things live under the word "overlay"; keep them distinct:
   //   1. city-level ML predictions — numbers per city, no geometry anywhere;
@@ -615,7 +603,8 @@ export function RiverMap({
                   </div>
                 ) : (
                   <p className="text-metadata mt-3 text-muted">
-                    Run a forecast to place the first city-level result on this map.
+                    Run a forecast to place the first city-level result on this
+                    map.
                   </p>
                 )}
                 {forecast?.days.length ? (
@@ -642,7 +631,8 @@ export function RiverMap({
                   </div>
                 ) : null}
                 <p className="text-metadata mt-2 text-muted">
-                  Experimental city-level index. Not a gauge reading or street-level warning.
+                  Experimental city-level index. Not a gauge reading or
+                  street-level warning.
                 </p>
               </div>
             ) : null}

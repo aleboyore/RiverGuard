@@ -99,9 +99,9 @@ export const recordOutlook = mutation({
     days: v.array(forecastDayValidator),
     /**
      * Sent only by this project's own Next server, which runs the forecast in
-     * `/api/forecast` without a Firebase identity of its own. Compared against
-     * the deployment's `RIVERGUARD_INGEST_SECRET`; without that variable set,
-     * the argument is ignored and an identity is required.
+     * `/api/forecast` and holds no Convex identity of its own. It is compared
+     * against the deployment's `RIVERGUARD_INGEST_SECRET`; without that
+     * variable set, the argument is ignored and an identity is required.
      */
     serverSecret: v.optional(v.string()),
   },
@@ -112,16 +112,16 @@ export const recordOutlook = mutation({
     alerts: v.number(),
   }),
   handler: async (ctx, args) => {
-    // This project's own Next server presents the deployment credential
-    // instead of a user identity. Residents (and everyone else with an active
-    // account) record runs they are themselves able to generate; LGU accounts
-    // stay scoped to their jurisdiction by assertLocationAccess.
+    // This project's own Next server runs the forecast and holds no Convex
+    // identity, so it presents the deployment credential instead. Residents
+    // record their own runs — they are the ones pressing the button; LGU
+    // accounts stay scoped to their jurisdiction by assertLocationAccess.
     const fromServer = hasIngestSecret(args.serverSecret);
     const user = fromServer
       ? null
       : await requireRole(ctx, ["admin", "lgu", "researcher", "resident"]);
     if (user) {
-      await assertLocationAccess(ctx, user, args.locationCode);
+      await assertLocationAccess(ctx, user, args.locationCode, ["researcher"]);
     }
     if (args.days.length === 0) {
       throw new Error("recordOutlook requires at least one forecast day");
@@ -196,7 +196,7 @@ export const recordOutlook = mutation({
           locationCode: args.locationCode,
           locationName: args.locationName,
           riskAssessmentId: assessmentId,
-          validAt,
+          date: day.date,
           severity: day.riskLevel,
           probability: day.probability,
           waterLevelM: day.waterLevelM,
@@ -219,7 +219,7 @@ export const recordOutlook = mutation({
   },
 });
 
-/** How many recent runs `latestOutlook` scans looking for this location. */
+/** How many recent runs `latestOutlook` will scan looking for this location. */
 const MAX_RUNS_SCANNED = 40;
 
 /**
@@ -231,32 +231,36 @@ export const latestOutlook = query({
   returns: v.union(v.any(), v.null()),
   handler: async (ctx, args) => {
     const user = await requireCurrentUser(ctx);
-    await assertLocationAccess(ctx, user, args.locationCode);
+    await assertLocationAccess(ctx, user, args.locationCode, [
+      "researcher",
+      "resident",
+    ]);
     /**
      * The newest completed run *that actually carries this location*.
      *
      * The previous version took the newest completed run across the whole
-     * deployment and filtered afterwards, so a city whose latest run was not
-     * the global newest got `null`. Runs are walked newest first and the
-     * first one with a row for this city wins; each probe takes a single
-     * row, so the cost is bounded by MAX_RUNS_SCANNED.
+     * deployment and filtered afterwards, so a resident of a city whose latest
+     * run was not the global newest was shown nothing. Runs are walked newest
+     * first and the first one with a row for this city wins; the per-run probe
+     * takes one row, so the cost is bounded by the number of runs scanned.
      */
     const candidateRuns = await ctx.db
       .query("forecastRuns")
       .withIndex("by_requested_at", (index: any) => index)
       .order("desc")
-      .filter((row: any) => row.status === "completed")
+      .filter((q) => q.eq(q.field("status"), "completed"))
       .take(MAX_RUNS_SCANNED);
 
-    let run: any = null;
+    let run: (typeof candidateRuns)[number] | null = null;
     for (const candidate of candidateRuns) {
       const probe = await ctx.db
         .query("forecasts")
         .withIndex("by_run_valid_at", (index: any) =>
           index.eq("runId", candidate._id),
         )
-        .filter((row: any) => row.locationCode === args.locationCode)
+        .filter((q) => q.eq(q.field("locationCode"), args.locationCode))
         .take(1);
+
       if (probe.length > 0) {
         run = candidate;
         break;
@@ -321,7 +325,7 @@ export const latestOutlook = query({
       .withIndex("by_location_created_at", (index: any) =>
         index.eq("locationCode", args.locationCode),
       )
-      .filter((row: any) => row.status === "open")
+      .filter((q) => q.eq(q.field("status"), "open"))
       .collect();
 
     return {
@@ -370,7 +374,9 @@ export const recentRuns = query({
   ),
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ["admin", "lgu", "researcher"]);
-    const allowedLocations = await assignedLocationCodes(ctx, user);
+    const allowedLocations = await assignedLocationCodes(ctx, user, [
+      "researcher",
+    ]);
     const runs = await ctx.db
       .query("forecastRuns")
       .withIndex("by_requested_at", (index: any) => index)
@@ -481,7 +487,9 @@ export const getRun = query({
       .collect();
 
     for (const forecast of forecasts) {
-      await assertLocationAccess(ctx, user, forecast.locationCode);
+      await assertLocationAccess(ctx, user, forecast.locationCode, [
+        "researcher",
+      ]);
     }
     if (forecasts.length === 0) {
       // A failed run stores no forecast rows, so the loop above never runs —

@@ -8,21 +8,26 @@ import {
   FloppyDisk,
   Plus,
   ShieldCheck,
-  UserPlus,
-  X,
 } from "@phosphor-icons/react";
+import { AccessPanel } from "../auth/AccessPanel";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../../../convex/_generated/api";
 
 import { useGisLayers } from "@/lib/use-gis-layers";
 import { useEffect, useState } from "react";
 
-import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RiverMap } from "@/components/map/RiverMap";
 import { Button } from "@/components/ui";
 import { cx } from "@/lib/classnames";
 import { supportedLocations } from "@/data/prototype";
+import {
+  DEFAULT_LOCATION,
+  getLocation,
+  isLocationCode,
+  locationCodeForName,
+} from "@/lib/locations";
 import {
   convexConfigured,
   OutlookBridge,
@@ -61,17 +66,37 @@ import {
 } from "./ResearcherScreens";
 import { formatProbability } from "@/lib/probability";
 
+/** The resident's saved city, or the default when they have not chosen one. */
+function usePrimaryLocation() {
+  const account = useQuery(api.users.getCurrent, {});
+  // `primaryLocation` is new in the schema; the generated types catch up on the
+  // next deploy, so read it through a narrow cast and validate the value.
+  const stored = (
+    account as { primaryLocation?: string | null } | null | undefined
+  )?.primaryLocation;
+  const chosen = Boolean(stored && isLocationCode(stored));
+  const code =
+    chosen && stored && isLocationCode(stored) ? stored : DEFAULT_LOCATION;
+  return {
+    code,
+    name: getLocation(code)?.name ?? "Marikina",
+    /** True once the resident has actually chosen a city. */
+    chosen,
+  };
+}
+
 function ResidentHome() {
-  const outlook = useOutlookFeed("marikina");
+  const primary = usePrimaryLocation();
+  const outlook = useOutlookFeed(primary.code);
   const snapshot = outlook.snapshot;
 
   return (
     <div className="mx-auto max-w-[96rem]">
       {convexConfigured ? (
-        <OutlookBridge locationCode="marikina" onSnapshot={outlook.adopt} />
+        <OutlookBridge locationCode={primary.code} onSnapshot={outlook.adopt} />
       ) : null}
       <WorkspaceHero
-        eyebrow="Marikina"
+        eyebrow={primary.name}
         title="My flood outlook"
         description="A simplified seven-day experimental outlook for your saved city, with official guidance kept clearly separate."
         notice={
@@ -97,7 +122,7 @@ function ResidentHome() {
         {[
           {
             label: "Saved city",
-            value: "Marikina",
+            value: primary.name,
             detail: "Primary location",
             icon: <MapPin size={18} />,
           },
@@ -146,10 +171,11 @@ function ResidentHome() {
 function ResidentLocationsWorkspace({}: {
   initialView?: "hazard" | "locations";
 } = {}) {
-  const [saved, setSaved] = useState("Marikina");
+  const primary = usePrimaryLocation();
+  const setPrimaryLocation = useMutation(convexFunctions.setPrimaryLocation);
   const [layer, setLayer] = useState<MapLayerId>("base");
   const [selectedDay, setSelectedDay] = useState(0);
-  const outlook = useOutlookFeed("marikina");
+  const outlook = useOutlookFeed(primary.code);
   const gis = useGisLayers();
 
   return (
@@ -177,7 +203,7 @@ function ResidentLocationsWorkspace({}: {
           activeLayer={layer}
           onLayerChange={setLayer}
           forecast={outlook.snapshot}
-          locationCode="marikina"
+          locationCode={primary.code}
           selectedDay={selectedDay}
           onDayChange={setSelectedDay}
           className="!h-[610px]"
@@ -194,17 +220,27 @@ function ResidentLocationsWorkspace({}: {
               >
                 <div className="mt-3">
                   <StatusBadge
-                    tone={location.name === saved ? "success" : "neutral"}
+                    tone={
+                      location.name === primary.name ? "success" : "neutral"
+                    }
                   >
-                    {location.name === saved ? "Primary" : "Available"}
+                    {location.name === primary.name ? "Primary" : "Available"}
                   </StatusBadge>
                   <Button
                     size="small"
-                    variant={location.name === saved ? "quiet" : "secondary"}
+                    variant={
+                      location.name === primary.name ? "quiet" : "secondary"
+                    }
                     className="mt-3 w-full"
-                    onClick={() => setSaved(location.name)}
+                    onClick={() =>
+                      void setPrimaryLocation({
+                        locationCode: locationCodeForName(location.name),
+                      })
+                    }
                   >
-                    {location.name === saved ? "Selected" : "Set primary"}
+                    {location.name === primary.name
+                      ? "Selected"
+                      : "Set primary"}
                   </Button>
                 </div>
               </Surface>
@@ -251,12 +287,20 @@ function HazardContext() {
 }
 
 function ResidentPreferences() {
+  const primary = usePrimaryLocation();
+  const setPrimaryLocation = useMutation(convexFunctions.setPrimaryLocation);
   const [saved, setSaved] = useState(false);
-  const [primaryCity, setPrimaryCity] = useState("Marikina");
+  const [primaryCity, setPrimaryCity] = useState(primary.name);
   const [defaultView, setDefaultView] = useState("Map");
   const [outlookNotify, setOutlookNotify] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps --
+     localStorage does not exist during the server render, so these preferences
+     can only be read after mount; a lazy initialiser would make the server and
+     client markup disagree. The account's saved city is read here once as a
+     fallback for an older device value — re-running on every change would fight
+     the resident's edits. */
   useEffect(() => {
     try {
       const stored = JSON.parse(
@@ -267,7 +311,11 @@ function ResidentPreferences() {
         outlookNotify?: boolean;
         reducedMotion?: boolean;
       };
-      if (stored.primaryCity) setPrimaryCity(stored.primaryCity);
+      // The city lives on the account now; localStorage only carries the
+      // device-level toggles below. Keep an older stored value as a fallback so
+      // the field is not blank for someone who saved it before this change.
+      if (!primary.chosen && stored.primaryCity)
+        setPrimaryCity(stored.primaryCity);
       if (stored.defaultView) setDefaultView(stored.defaultView);
       setOutlookNotify(Boolean(stored.outlookNotify));
       setReducedMotion(Boolean(stored.reducedMotion));
@@ -275,17 +323,16 @@ function ResidentPreferences() {
       // Invalid local preferences are ignored and reset by the next save.
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function savePreferences() {
     window.localStorage.setItem(
       "riverguard:resident-preferences",
-      JSON.stringify({
-        primaryCity,
-        defaultView,
-        outlookNotify,
-        reducedMotion,
-      }),
+      JSON.stringify({ defaultView, outlookNotify, reducedMotion }),
     );
+    // The primary city is account data, not device data: it has to survive a
+    // reload and follow the resident to another browser.
+    void setPrimaryLocation({ locationCode: locationCodeForName(primaryCity) });
     setSaved(true);
   }
   return (
@@ -346,7 +393,8 @@ function ResidentPreferences() {
         </Button>
         {saved ? (
           <p className="text-metadata mt-2 text-success" role="status">
-            Preferences saved on this device.
+            Preferences saved. Your primary city is stored on your account; the
+            display options stay on this device.
           </p>
         ) : null}
       </Surface>
@@ -924,308 +972,16 @@ function AdminHome() {
           </Notice>
         }
       />
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric
-          label="Pending requests"
-          value="3"
-          detail="Two require review"
-          tone="warning"
-        />
-        <Metric
-          label="Active users"
-          value="3"
-          detail="Across resident, LGU, and admin"
-          tone="primary"
-        />
-        <Metric
-          label="Supported cities"
-          value="4"
-          detail="City-level coverage"
-          tone="secondary"
-        />
-        <Metric
-          label="System readiness"
-          value="Partial"
-          detail="Backend disconnected"
-          tone="warning"
-        />
-      </div>
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
-        <Surface title="Configuration status">
-          <div className="grid gap-2">
-            {[
-              ["Weather provider", "Configuration pending", "warning"],
-              ["Model version", "Experimental selected", "info"],
-              ["Hazard layers", "Source verification pending", "warning"],
-              ["Convex deployment", "Not connected", "danger"],
-            ].map(([label, value, tone]) => (
-              <div
-                key={label}
-                className="flex items-center justify-between rounded-control border border-line px-3 py-2"
-              >
-                <span className="text-body">{label}</span>
-                <StatusBadge tone={tone as "warning" | "info" | "danger"}>
-                  {value}
-                </StatusBadge>
-              </div>
-            ))}
-          </div>
-        </Surface>
-        <Surface title="Recent audit activity">
-          <p className="text-body text-muted">
-            No audit events are recorded. Nothing in this prototype writes an
-            audit trail, so this panel is intentionally empty rather than
-            illustrative.
+      <div className="mt-3 grid gap-3">
+        <Surface title="Workspace invitations">
+          <p>
+            Invite a verified recipient to a role, assign an LGU city, or check
+            delivery.
           </p>
+          <ActionLink href="/admin/users">Manage invitations</ActionLink>
         </Surface>
+        <AccessPanel view="audit" />
       </div>
-    </>
-  );
-}
-
-function AccessRequests({ detail }: { detail?: string }) {
-  if (detail) return <RequestReview />;
-  return (
-    <>
-      <PageHeading
-        title="User access requests"
-        eyebrow="Administrator review"
-        description="Review verified identity, organization, requested role, location scope, and reason before assigning access."
-      />
-      <Surface title="Pending requests">
-        <p className="text-body text-muted">
-          No access requests are recorded. Account provisioning is not wired to
-          a backend in this prototype.
-        </p>
-      </Surface>
-    </>
-  );
-}
-
-function RequestReview() {
-  return (
-    <>
-      <PageHeading
-        title="Review access request"
-        eyebrow="Marco Santos · Marikina DRRMO"
-        description="Assign the minimum approved role and location scope after verification."
-        actions={
-          <ActionLink href="/admin/requests" variant="quiet">
-            Back to requests
-          </ActionLink>
-        }
-      />
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <Surface title="Decision">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <SelectControl id="approved-role" label="Approved role">
-              <option>LGU operator</option>
-            </SelectControl>
-            <SelectControl id="approved-location" label="Permitted locations">
-              <option>Marikina only</option>
-              <option>No assignment</option>
-            </SelectControl>
-            <TextField
-              id="review-date"
-              label="Review date"
-              type="date"
-              defaultValue="2026-11-11"
-            />
-            <TextField
-              id="access-expiry"
-              label="Optional review date"
-              type="date"
-            />
-            <div className="sm:col-span-2">
-              <TextAreaField
-                id="decision-note"
-                label="Decision note"
-                placeholder="Record verification and scope rationale…"
-              />
-            </div>
-          </div>
-          <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Button
-              size="small"
-              variant="quiet"
-              disabled
-            >
-              Request information
-            </Button>
-            <Button
-              size="small"
-              variant="danger"
-              disabled
-            >
-              Reject
-            </Button>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled
-            >
-              Approve
-            </Button>
-          </div>
-        </Surface>
-        <Surface title="Request evidence">
-          <dl className="text-body grid grid-cols-[110px_1fr] gap-2">
-            <dt className="text-muted">Identity</dt>
-            <dd>Verified</dd>
-            <dt className="text-muted">Organization</dt>
-            <dd>Marikina DRRMO</dd>
-            <dt className="text-muted">Requested role</dt>
-            <dd>LGU operator</dd>
-            <dt className="text-muted">Location</dt>
-            <dd>Marikina</dd>
-            <dt className="text-muted">Submitted</dt>
-            <dd>Nov 10, 16:05</dd>
-          </dl>
-        </Surface>
-      </div>
-    </>
-  );
-}
-
-function UsersRoles() {
-  const [message, setMessage] = useState("");
-  const [modal, setModal] = useState<"invite" | null>(null);
-  return (
-    <>
-      <PageHeading
-        title="Users and roles"
-        eyebrow="Access administration"
-        description="Inspect role, account status, assigned locations, MFA state, and recent access."
-        actions={
-          <Button
-            size="small"
-            onClick={() => {
-              setMessage("");
-              setModal("invite");
-            }}
-          >
-            <UserPlus size={14} /> Invite user
-          </Button>
-        }
-      />
-      <Surface title="Approved users">
-        <p className="text-body text-muted">
-          No user records are available. Authentication and user administration
-          are outside this research prototype, so no names are shown.
-        </p>
-      </Surface>
-      {message ? (
-        <p className="text-metadata mt-2 text-success" role="status">
-          {message}.
-        </p>
-      ) : null}
-      {modal ? (
-        <div
-          className="fixed inset-0 z-[70] flex items-start justify-center bg-ink/25 px-4 pt-[10vh] backdrop-blur-[2px]"
-          role="presentation"
-          onMouseDown={() => setModal(null)}
-        >
-          <section
-            className="w-full max-w-xl rounded-panel border border-line bg-canvas p-5 shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="user-modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-line pb-3">
-              <div>
-                <h2 id="user-modal-title" className="text-section">
-                  Invite user
-                </h2>
-                <p className="text-metadata mt-0.5 text-muted">
-                  Send an invitation for a RiverGuard workspace account.
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close dialog"
-                className="inline-flex size-8 items-center justify-center rounded-control text-muted hover:bg-canvas-soft hover:text-ink"
-                onClick={() => setModal(null)}
-              >
-                <X size={17} />
-              </button>
-            </div>
-            <form
-              className="mt-4 grid gap-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                setModal(null);
-                setMessage("Invitation queued (not delivered — no backend)");
-              }}
-            >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <TextField
-                  id="user-modal-name"
-                  label="Full name"
-                  placeholder="Full name"
-                  required
-                />
-                <TextField
-                  id="user-modal-email"
-                  label="Email"
-                  type="email"
-                  placeholder="name@organisation.gov.ph"
-                  required
-                />
-                <TextField
-                  id="user-modal-organization"
-                  label="Organization"
-                  placeholder="Organisation"
-                  required
-                />
-                <SelectControl
-                  id="user-modal-role"
-                  label="Role"
-                  defaultValue="LGU operator"
-                >
-                  <option>Resident</option>
-                  <option>LGU operator</option>
-                  <option>Administrator</option>
-                </SelectControl>
-                <SelectControl
-                  id="user-modal-location"
-                  label="Assigned locations"
-                  defaultValue="Supported NCR cities"
-                >
-                  <option>Supported NCR cities</option>
-                  <option>Marikina</option>
-                  <option>Quezon City</option>
-                  <option>Manila</option>
-                  <option>Pasig</option>
-                  <option>All</option>
-                </SelectControl>
-                <SelectControl
-                  id="user-modal-mfa"
-                  label="MFA requirement"
-                  defaultValue="Optional"
-                >
-                  <option>Optional</option>
-                  <option>Enabled</option>
-                  <option>Required</option>
-                </SelectControl>
-              </div>
-              <div className="flex justify-end gap-2 border-t border-line pt-4">
-                <Button
-                  type="button"
-                  size="small"
-                  variant="quiet"
-                  onClick={() => setModal(null)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" size="small">
-                  Send invitation
-                </Button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
     </>
   );
 }
@@ -1282,7 +1038,9 @@ function ConfigurationScreen({
   kind: string;
   detail?: string;
 }) {
-  const [saved, setSaved] = useState(false);
+  // `saved` is read for the "saved" confirmation; nothing in this screen sets
+  // it because the form is not wired to a backend yet.
+  const [saved] = useState(false);
   const searchParams = useSearchParams();
   const researchView =
     searchParams.get("view") === "research" || Boolean(detail);
@@ -1422,44 +1180,6 @@ function ConfigurationScreen({
   );
 }
 
-function AuditLog() {
-  return (
-    <>
-      <PageHeading
-        title="Audit log"
-        eyebrow="Administrator evidence"
-        description="Review who changed what, when, and with what result. Sensitive values remain redacted."
-      />
-      <Surface className="mb-3" title="Filters">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <TextField
-            id="audit-actor"
-            label="Actor"
-            placeholder="Name or system"
-          />
-          <SelectControl id="audit-action" label="Action type">
-            <option>All actions</option>
-            <option>Access</option>
-            <option>Configuration</option>
-          </SelectControl>
-          <TextField id="audit-date" label="Date" type="date" />
-          <SelectControl id="audit-outcome" label="Outcome">
-            <option>All outcomes</option>
-            <option>Success</option>
-            <option>Pending information</option>
-          </SelectControl>
-        </div>
-      </Surface>
-      <Surface title="Recorded activity">
-        <p className="text-body text-muted">
-          No audit events are recorded. This prototype does not write an audit
-          trail, so the log is empty by design.
-        </p>
-      </Surface>
-    </>
-  );
-}
-
 function AdminSettings() {
   return (
     <>
@@ -1543,10 +1263,11 @@ function AdminResearchSeparation() {
 
 export function AdminScreen({ segments }: { segments: string[] }) {
   const [screen, detail] = segments;
-  if (!screen) return <DashboardLayout />;
+  if (!screen) return <AdminHome />;
   if (screen === "research") return <AdminResearchSeparation />;
-  if (screen === "requests") return <AccessRequests detail={detail} />;
-  if (screen === "users") return <UsersRoles />;
+  if (screen === "requests")
+    return <AccessPanel view="queue" detail={detail} />;
+  if (screen === "users") return <AccessPanel view="invite" />;
   if (
     [
       "locations",
@@ -1557,7 +1278,7 @@ export function AdminScreen({ segments }: { segments: string[] }) {
     ].includes(screen)
   )
     return <ConfigurationScreen kind={screen} detail={detail} />;
-  if (screen === "audit") return <AuditLog />;
+  if (screen === "audit") return <AccessPanel view="audit" />;
   if (screen === "settings") return <AdminSettings />;
   return <AdminHome />;
 }

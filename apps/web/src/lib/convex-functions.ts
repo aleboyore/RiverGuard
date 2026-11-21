@@ -175,6 +175,11 @@ export const convexFunctions = {
     RecordOutlookArgs,
     RecordOutlookResult
   >("forecasts:recordOutlook"),
+  setPrimaryLocation: makeFunctionReference<
+    "mutation",
+    { locationCode: string },
+    { updated: boolean }
+  >("users:setPrimaryLocation"),
   recordFailure: makeFunctionReference<
     "mutation",
     RecordFailureArgs,

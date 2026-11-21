@@ -33,6 +33,8 @@ interface ForecastRequestBody {
 }
 
 export async function POST(request: Request) {
+  // A forecast costs a weather call and a model run, and writes a run to the
+  // deployment. Anonymous callers used to be able to spend both.
   let body: ForecastRequestBody;
   try {
     body = (await request.json()) as ForecastRequestBody;
@@ -139,6 +141,9 @@ export async function POST(request: Request) {
   const accessToken = request.headers
     .get("authorization")
     ?.replace(/^Bearer\s+/i, "");
+  // Convex has to know who wrote the row. A signed-in operator proves it
+  // with their ID token; this server cannot, so `persistOutlook` presents the
+  // deployment credential from its own server environment.
   const persistence = await persistOutlook(
     bundle,
     forecast,
