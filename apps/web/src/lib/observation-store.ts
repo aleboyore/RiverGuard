@@ -109,6 +109,12 @@ export async function saveObservedDays(
         locationCode,
         locationName,
         days: batch,
+        // Server-only credential (never NEXT_PUBLIC_*). When it is not set,
+        // the deployment rejects the write and this returns an honest
+        // StoreWriteResult error instead of pretending the days were saved.
+        ...(process.env.RIVERGUARD_INGEST_SECRET
+          ? { secret: process.env.RIVERGUARD_INGEST_SECRET }
+          : {}),
       });
       stored += batch.length;
     }

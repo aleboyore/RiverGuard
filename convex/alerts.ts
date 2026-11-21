@@ -15,6 +15,7 @@ import {
 import { v } from "convex/values";
 
 import { requireRole } from "./auth";
+import { assertLocationAccess } from "./lgu";
 
 export const listForLocation = query({
   args: {
@@ -23,7 +24,8 @@ export const listForLocation = query({
   },
   returns: v.any(),
   handler: async (ctx, args) => {
-    await requireRole(ctx, ["resident", "lgu", "admin"]);
+    const user = await requireRole(ctx, ["resident", "lgu", "admin"]);
+    await assertLocationAccess(ctx, user, args.locationCode);
     return await ctx.db
       .query("alerts")
       .withIndex("by_location_created_at", (index) =>
@@ -39,7 +41,8 @@ export const listOpenForLocation = query({
   args: { locationCode: v.string(), limit: v.optional(v.number()) },
   returns: v.any(),
   handler: async (ctx, args) => {
-    await requireRole(ctx, ["resident", "lgu", "admin"]);
+    const user = await requireRole(ctx, ["resident", "lgu", "admin"]);
+    await assertLocationAccess(ctx, user, args.locationCode);
     const rows = await ctx.db
       .query("alerts")
       .withIndex("by_location_created_at", (index: any) =>
@@ -104,7 +107,7 @@ export async function raiseAlertIfElevated(
     severity: input.severity,
     title: `Elevated flood risk - ${input.locationName} - ${when}`,
     message:
-      `Experimental model output: ${(input.probability * 100).toFixed(0)}% flood probability, ` +
+      `Experimental model output: ${(input.probability * 100).toFixed(2)}% flood probability, ` +
       `predicted level ${input.waterLevelM.toFixed(2)} m (${
         input.alertLevel === "none"
           ? "below alarm levels"
@@ -149,10 +152,15 @@ export async function resolveSupersededAlerts(
 }
 
 export const acknowledge = mutation({
-  args: { alertId: v.id("alerts"), acknowledgedBy: v.optional(v.id("users")) },
+  // acknowledgement identity comes from the verified auth context; a
+  // client-supplied acknowledgedBy is never trusted.
+  args: { alertId: v.id("alerts") },
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ["lgu", "admin"]);
+    const alert = await ctx.db.get(args.alertId);
+    if (!alert) throw new Error("Alert not found.");
+    await assertLocationAccess(ctx, user, alert.locationCode);
     await ctx.db.patch(args.alertId, {
       status: "acknowledged",
       acknowledgedAt: Date.now(),
@@ -166,7 +174,10 @@ export const resolve = mutation({
   args: { alertId: v.id("alerts") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireRole(ctx, ["lgu", "admin"]);
+    const user = await requireRole(ctx, ["lgu", "admin"]);
+    const alert = await ctx.db.get(args.alertId);
+    if (!alert) throw new Error("Alert not found.");
+    await assertLocationAccess(ctx, user, alert.locationCode);
     await ctx.db.patch(args.alertId, {
       status: "resolved",
       resolvedAt: Date.now(),

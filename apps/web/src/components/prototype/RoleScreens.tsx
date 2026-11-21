@@ -59,6 +59,7 @@ import {
   LocationDetails,
   Models,
 } from "./ResearcherScreens";
+import { formatProbability } from "@/lib/probability";
 
 function ResidentHome() {
   const outlook = useOutlookFeed("marikina");
@@ -701,7 +702,7 @@ function ReviewEditor({
                   <td className="px-3 py-2">{day.date}</td>
                   <td className="px-3 py-2">{day.rainfallMm.toFixed(1)} mm</td>
                   <td className="px-3 py-2">
-                    {(day.probability * 100).toFixed(1)}%
+                    {formatProbability(day.probability)}
                   </td>
                   <td className="px-3 py-2 capitalize">{day.riskLevel}</td>
                 </tr>

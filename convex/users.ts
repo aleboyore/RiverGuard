@@ -42,6 +42,17 @@ export const ensureCurrent = mutation({
       throw new Error("Authentication is required");
     }
 
+    // Self-registration is limited to resident, lgu and researcher. An admin
+    // account can never be minted from the app — the first administrator is
+    // provisioned manually on the deployment (see
+    // docs/convex-setup-and-migration-guide.md, §9), and further ones by an
+    // existing administrator.
+    if (args.requestedRole === "admin") {
+      throw new Error(
+        "Administrator accounts cannot be self-registered. Ask an existing administrator to provision one.",
+      );
+    }
+
     const externalId = identity.subject;
     const now = Date.now();
     const existing = await ctx.db
@@ -82,7 +93,11 @@ export const ensureCurrent = mutation({
     return {
       userId,
       role: args.requestedRole ?? "resident",
-      status: "active",
+      // The account's real state: lgu/researcher signups wait for review.
+      status:
+        args.requestedRole === "lgu" || args.requestedRole === "researcher"
+          ? "pending"
+          : "active",
     };
   },
 });

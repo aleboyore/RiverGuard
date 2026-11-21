@@ -18,7 +18,7 @@
 
 import { NextResponse } from "next/server";
 
-import { persistOutlook } from "@/lib/forecast-persistence";
+import { persistFailure, persistOutlook } from "@/lib/forecast-persistence";
 import { getLocation } from "@/lib/locations";
 import { MlServiceError, requestDailyForecast } from "@/lib/ml-client";
 import { describeModelInput } from "@/lib/model-input";
@@ -66,14 +66,28 @@ export async function POST(request: Request) {
   try {
     bundle = await getWeatherBundle(location);
   } catch (error) {
+    const accessToken = request.headers
+      .get("authorization")
+      ?.replace(/^Bearer\s+/i, "");
+    const reason = error instanceof Error ? error.message : "unknown error";
+    const failure = await persistFailure({
+      locationCode: location.code,
+      locationName: location.name,
+      failureStage: "weather_provider",
+      reason: `Weather provider failed: ${reason}`,
+      accessToken,
+    });
     return NextResponse.json(
       {
         error:
           "Weather provider failed and the offline forecast fallback is disabled.",
-        detail: error instanceof Error ? error.message : "unknown error",
+        detail: reason,
         // Same key as the success path, so a client reads one shape either way.
         // There is no input to describe when no provider answered.
         observedState: null,
+        failure: failure.tracked
+          ? { tracked: true, kind: failure.kind }
+          : { tracked: false, error: failure.error ?? "failure not logged" },
       },
       { status: 502 },
     );
@@ -93,12 +107,29 @@ export async function POST(request: Request) {
   try {
     forecast = await requestDailyForecast(bundle);
   } catch (error) {
+    const accessToken = request.headers
+      .get("authorization")
+      ?.replace(/^Bearer\s+/i, "");
+    const reason = error instanceof Error ? error.message : "unknown error";
+    const failure = await persistFailure({
+      locationCode: location.code,
+      locationName: location.name,
+      provider: bundle.provider,
+      providerDegraded: bundle.degraded,
+      retrievedAt: Date.parse(bundle.retrievedAt),
+      failureStage: "ml_service",
+      reason: `ML service failed: ${reason}`,
+      accessToken,
+    });
     return NextResponse.json(
       {
         error: "The local ML service did not produce a forecast.",
-        detail: error instanceof Error ? error.message : "unknown error",
+        detail: reason,
         weather: summariseWeather(bundle),
         observedState: inputState,
+        failure: failure.tracked
+          ? { tracked: true, kind: failure.kind }
+          : { tracked: false, error: failure.error ?? "failure not logged" },
       },
       { status: error instanceof MlServiceError ? 503 : 500 },
     );

@@ -24,6 +24,13 @@ export async function assignedLocationCodes(
     profile?.cityCode,
   ].filter((value): value is string => Boolean(value));
 
+  if (values.length === 0) {
+    // An LGU account with no provisioned jurisdiction is locked out, but the
+    // message must say why and where the fix lives — an empty list used to
+    // surface as the same generic error for "typo in the city code".
+    return [];
+  }
+
   return [...new Set(values.map(normalizeLocationCode))];
 }
 
@@ -33,11 +40,16 @@ export async function assertLocationAccess(
   locationCode: string,
 ) {
   const allowed = await assignedLocationCodes(ctx, user);
-  if (
-    allowed !== null &&
-    !allowed.includes(normalizeLocationCode(locationCode))
-  ) {
-    throw new Error("This location is outside your approved LGU assignment.");
+  if (allowed === null) return;
+  if (allowed.length === 0) {
+    throw new Error(
+      "This LGU account has no assigned jurisdiction. Ask a RiverGuard administrator to provision the lguProfiles row for this account (see docs/convex-setup-and-migration-guide.md, §8).",
+    );
+  }
+  if (!allowed.includes(normalizeLocationCode(locationCode))) {
+    throw new Error(
+      "This location is outside your approved LGU assignment.",
+    );
   }
 }
 

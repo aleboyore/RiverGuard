@@ -209,6 +209,19 @@ if (!convexUrl) {
   );
 }
 
+/**
+ * The ingest mutations refuse anonymous writes (`convex/ingest.ts`), so an
+ * import has to prove it is allowed: either this secret, or a signed-in
+ * administrator. Fail here, with the reason, rather than 200 times inside the
+ * deployment. --validate-only never reaches this point.
+ */
+const ingestSecret = process.env.RIVERGUARD_INGEST_SECRET;
+if (!ingestSecret) {
+  throw new Error(
+    "RIVERGUARD_INGEST_SECRET is required for import. Set it to the value configured on the deployment (npx convex env set RIVERGUARD_INGEST_SECRET ...).",
+  );
+}
+
 const client = new ConvexHttpClient(convexUrl);
 for (let index = 0; index < records.length; index += 200) {
   const batch = records.slice(index, index + 200);
@@ -221,6 +234,7 @@ for (let index = 0; index < records.length; index += 200) {
     dateMin,
     dateMax,
     records: batch,
+    secret: ingestSecret,
   });
   console.log(`Imported ${Math.min(index + batch.length, records.length)}/${records.length}`);
 }
@@ -229,5 +243,6 @@ await client.mutation(anyApi.historical.upsertFloodEvents, {
   datasetId,
   source: "data/flood_events.csv",
   events,
+  secret: ingestSecret,
 });
 console.log("Historical dataset import complete.");

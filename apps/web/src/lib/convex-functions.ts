@@ -58,6 +58,12 @@ export type RecordOutlookArgs = {
     exceedsOperatingThreshold: boolean;
     reasons: string[];
   }>;
+  /**
+   * Sent only by this project's own Next server when the caller has no
+   * Firebase identity. Compared against the deployment's
+   * `RIVERGUARD_INGEST_SECRET`; never present in the browser bundle.
+   */
+  serverSecret?: string;
 };
 
 export interface RecordOutlookResult {
@@ -79,7 +85,31 @@ export interface RecentRun {
   modelVersion: string | null;
   reviewStatus: "pending" | "reviewed" | "escalated" | "returned";
   reviewerName: string | null;
+  /** Present when status is "failed": e.g. "weather_provider" | "ml_service". */
+  errorCode?: string | null;
+  /** Present when status is "failed": short, sanitised, reader-facing reason. */
+  failureReason?: string | null;
 }
+
+export type RecordFailureStage =
+  | "weather_provider"
+  | "ml_service"
+  | "persistence"
+  | "unknown";
+
+export type RecordFailureArgs = {
+  locationCode: string;
+  locationName?: string;
+  issueDate?: string;
+  provider?: string;
+  providerDegraded?: boolean;
+  retrievedAt?: number;
+  failureStage: RecordFailureStage;
+  /** Sanitised server-side too; capped at 300 chars, no secrets. */
+  failureReason: string;
+  /** Present only for this project's own Next server; never browser-side. */
+  serverSecret?: string;
+};
 
 export interface LguReview {
   status: "reviewed" | "escalated" | "returned";
@@ -145,6 +175,11 @@ export const convexFunctions = {
     RecordOutlookArgs,
     RecordOutlookResult
   >("forecasts:recordOutlook"),
+  recordFailure: makeFunctionReference<
+    "mutation",
+    RecordFailureArgs,
+    { runId: string }
+  >("forecasts:recordFailure"),
   latestOutlook: makeFunctionReference<
     "query",
     { locationCode: string },
@@ -202,6 +237,11 @@ export const convexFunctions = {
         sourceLabel?: string;
         retrievedAt: number;
       }>;
+      /**
+       * Server-to-server proof for the deployment's ingest credential. Never
+       * present in the browser bundle — callers are server modules only.
+       */
+      secret?: string;
     },
     { inserted: number; updated: number }
   >("observedWeather:upsertDays"),
